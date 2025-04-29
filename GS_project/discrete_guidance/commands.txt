@@ -1,9 +1,0 @@
-CUDA_VISIBLE_DEVICES=0 python ./scripts/train_diffusion.py /home/son9ih/discrete_guidance/applications/cifar10 denoising --wandb
-
-applications/molecules까지 들어가서 입력
-CUDA_VISIBLE_DEVICES=0 python scripts/train.py -c ./config_files/training_defaults.yaml -m "all"
-CUDA_VISIBLE_DEVICES=5 python scripts/train.py -c ./config_files/training_defaults_sumo.yaml -m "denoising_model"
-
-CUDA_VISIBLE_DEVICES=0 python scripts/generate.py -c config_files/generation_defaults.yaml -n 1000 -p "num_rings=1"
-
-CUDA_VISIBLE_DEVICES=0 python scripts/generate.py -c config_files/generation_defaults.yaml -n 400 -p "logp=-1"
