@@ -62,6 +62,7 @@ if __name__=='__main__':
 
     # Extract the requested number of unique valid nswcs (uvnswcs) from the arguments
     num_uvnswcs_requested = int(args.num_valid_molecule_samples)
+    # num_uvnswcs_requested = int(100*generation_cfg.sampler.max_iterations)
 
     # Create a folder for the current generation run
     # save_location = ./generated
@@ -99,6 +100,9 @@ if __name__=='__main__':
     orchestrator = factory.Orchestrator.from_run_folder(run_folder_dir=generation_cfg.trained_run_folder_dir, overrides=trained_overrides, load_data=True, logger=logger)
 
     # Load all models
+    # 여기에 훈련된 diffusion과 predictor 모델이 로드됨
+    # manager.models_dict = {
+    #     'denoising_model': denoising_model,'waiting_model': waiting_model, 'num_rings_predictor_model': num_rings_predictor_model, 'num_tokens_predictor_model': num_tokens_predictor_model, 'logp_predictor_model': logp_predictor_model, 'num_heavy_atoms_predictor_model': num_heavy_atoms_predictor_model
     orchestrator.manager.load_all_models()
 
     # Update the generation configurations without overwriting entries
@@ -139,7 +143,7 @@ if __name__=='__main__':
     sampled_uvnswcs_list = list() # Keep track of the sampled unique valid nswcs (uvnswcs)
     generated_df_list    = list()
     global_start_time    = time.time()
-    logger.info(f"Will generate molecules are at least {num_uvnswcs_requested} molecules (i.e. nswcs) have been sampled.")
+    logger.info(f"Will generate layout are at least {num_uvnswcs_requested} layouts (i.e. nswcs) have been sampled.")
     for iteration in range(generation_cfg.sampler.max_iterations):
         # If no property is specified, use unconditional sampling
         if target_property_value is None:
@@ -158,6 +162,7 @@ if __name__=='__main__':
                 err_msg = f"There is no predictor model with name '{predictor_model_name}'. Allowed predictor models are: {list(orchestrator.manager.models_dict.keys())}"
                 raise ValueError(err_msg)
 
+            # Here we use generation cfg
             x_generated = eval_manager.generate(num_samples=generation_cfg.sampler.batch_size, #500, 
                                                 seed=None, # Only use the external seed
                                                 stochasticity=generation_cfg.sampler.noise,
@@ -169,118 +174,135 @@ if __name__=='__main__':
 
 
         # Analyze the generated x
+        # filtering here?
+        
+        # generated sample들을 decoding? 그럴 필요 없는데
+        # 원소의 기호를 index숫자로 바꿔서 diffusion으로 넣어준 것이고, 이게 잘 됬다면 그냥 포함시켜도 상관없을듯
         generated_smiles_list = [orchestrator.molecules_data_handler.smiles_encoder.decode(utils.to_numpy(smiles_encoded)) for smiles_encoded in x_generated]
-        analysis_dict = utils.analyze_generated_smiles(generated_smiles_list, 
-                                                       orchestrator.molecules_data_handler.subset_df_dict['train']['nswcs'],
-                                                       pad_token=orchestrator.molecules_data_handler.pad_token,
-                                                       logger=logger)
-
-        # Construct a table with the generated molecules
-        iter_dict = collections.defaultdict(list)
-        for x, smiles in zip(x_generated, generated_smiles_list):    
-            # Get the validity
-            valid = (smiles in analysis_dict['unique_valid_gen_smiles_list'])
-
-            # If the smiles is not valid, continue to next smiles
-            if valid==False:
-                continue
-
-            # Determine the nswcs
-            # Remark: This is only possible for valid molecules (hence do this after the validation filter above)!
-            nswcs = analysis_dict['smiles_to_nswcs_map'][smiles]
-
-            # Append to corresponding lists
-            iter_dict['smiles'].append(smiles)
-            iter_dict['valid'].append(valid)
-            iter_dict['nswcs'].append(nswcs)
-
-            # If a property has been defined, determine the property value(s) of the generated molecule 
-            if property_name!='None':
-                # Determine the ground truth (using RDKit) property value
-                ground_truth_property_value = cheminf.get_property_value(smiles, property_name=property_name)
-
-                # Construct the predictor model name based on the property name
-                predictor_model_name = f"{property_name}_predictor_model"
-                logger.info(f"Predictor model name: {predictor_model_name}")
-
-                # Predict the property value using the corresponding predictor model
-                predicted_property_value = orchestrator.manager.predict_property(predictor_model_name, x=x, t=1, return_probs=False)
-
-                # Append to corresponding lists
-                if target_property_value is None:
-                    iter_dict[f"target_{property_name}"].append('None')
-                else:
-                    iter_dict[f"target_{property_name}"].append(target_property_value)
-                iter_dict[f"predicted_{property_name}"].append(predicted_property_value)
-                iter_dict[f"ground_truth_{property_name}"].append(ground_truth_property_value)
-
-        # Transform the dictionary of lists to a pandas.DataFrame
-        iter_df = pd.DataFrame(iter_dict)
+        generated_df_list.extend(generated_smiles_list)
         
-        # Make the iter_dict a pandas DataFrame and append it to the corresponding list
-        generated_df_list.append(pd.DataFrame(iter_dict))
-
-        # Update the list of unique valid nswcs (uvnswcs)
-        if 0<len(iter_df): # If there were no molecules in this iteration, we cannot update
-            filtered_df = iter_df[iter_df['valid']==True]
-            sampled_uvnswcs_list += list(set(filtered_df['nswcs']))
-            sampled_uvnswcs_list = list(set(sampled_uvnswcs_list))
-
-        # Determine the number of sampled unique valid nswcs (uvnswcs)
-        num_sampled_uvnswcs = len(sampled_uvnswcs_list)
-
-        if logger is None:
-            print(f"[{iteration}] Number of already sampled unique valid nswcs: {num_sampled_uvnswcs} (Duration since start: {(time.time()-global_start_time)/60:.2f}min)")
-            print('-'*100)
-        else:
-            logger.info(f"[{iteration}] Number of already sampled unique valid nswcs: {num_sampled_uvnswcs} (Duration since start: {(time.time()-global_start_time)/60:.2f}min)")
-            logger.info('-'*100)
-
-        tensorboard_writer.add_scalar(f"{property_name}/Num-sampled-molecules", num_sampled_uvnswcs, iteration)
-
-        # If the number of unique valid generated nswcs exceeds the requestes number, 
-        # halt generation
-        
-        if num_uvnswcs_requested<=num_sampled_uvnswcs:
+        if len(generated_df_list) > num_uvnswcs_requested:
+            generated_df_list = generated_df_list[:num_uvnswcs_requested]
             break
+            
+        # filtering duplicated or invalid smiles
+    #     analysis_dict = utils.analyze_generated_smiles(generated_smiles_list, 
+    #                                                    orchestrator.molecules_data_handler.subset_df_dict['train']['nswcs'],
+    #                                                    pad_token=orchestrator.molecules_data_handler.pad_token,
+    #                                                    logger=logger)
 
-    logger.info(f"Generated at least {num_uvnswcs_requested} valid molecules. Duration: {(time.time()-global_start_time)/60:.2f}min")
+    #     # Construct a table with the generated molecules
+    #     iter_dict = collections.defaultdict(list)
+    #     for x, smiles in zip(x_generated, generated_smiles_list):    
+    #         # Get the validity
+    #         valid = (smiles in analysis_dict['unique_valid_gen_smiles_list'])
 
-    # Stack the DataFrames in the list 'generated_df_list' to obtain one big DataFrame
-    generated_df = pd.concat(generated_df_list)
+    #         # If the smiles is not valid, continue to next smiles
+    #         if valid==False:
+    #             continue
 
-    # Only keep the first 'args.num_valid_molecule_samples' samples
-    generated_df = generated_df[:args.num_valid_molecule_samples]
+    #         # Determine the nswcs
+    #         # Remark: This is only possible for valid molecules (hence do this after the validation filter above)!
+    #         nswcs = analysis_dict['smiles_to_nswcs_map'][smiles]
+
+    #         # Append to corresponding lists
+    #         iter_dict['smiles'].append(smiles)
+    #         iter_dict['valid'].append(valid)
+    #         iter_dict['nswcs'].append(nswcs)
+
+    #         # If a property has been defined, determine the property value(s) of the generated molecule 
+    #         if property_name!='None':
+    #             # 우린 이걸 시뮬레이션 통하지 않고는 죽어도 모르니까 이걸 그냥 저장하면 되겠네
+    #             # invalid샘플 제외하고
+    #             # Determine the ground truth (using RDKit) property value
+    #             ground_truth_property_value = cheminf.get_property_value(smiles, property_name=property_name)
+
+    #             # Construct the predictor model name based on the property name
+    #             predictor_model_name = f"{property_name}_predictor_model"
+    #             logger.info(f"Predictor model name: {predictor_model_name}")
+
+    #             # Predict the property value using the corresponding predictor model
+    #             predicted_property_value = orchestrator.manager.predict_property(predictor_model_name, x=x, t=1, return_probs=False)
+
+    #             # Append to corresponding lists
+    #             if target_property_value is None:
+    #                 iter_dict[f"target_{property_name}"].append('None')
+    #             else:
+    #                 iter_dict[f"target_{property_name}"].append(target_property_value)
+    #             iter_dict[f"predicted_{property_name}"].append(predicted_property_value)
+    #             iter_dict[f"ground_truth_{property_name}"].append(ground_truth_property_value)
+
+    #     # Transform the dictionary of lists to a pandas.DataFrame
+    #     iter_df = pd.DataFrame(iter_dict)
+        
+    #     # Make the iter_dict a pandas DataFrame and append it to the corresponding list
+    #     generated_df_list.append(pd.DataFrame(iter_dict))
+
+    #     # Update the list of unique valid nswcs (uvnswcs)
+    #     if 0<len(iter_df): # If there were no molecules in this iteration, we cannot update
+    #         filtered_df = iter_df[iter_df['valid']==True]
+    #         sampled_uvnswcs_list += list(set(filtered_df['nswcs']))
+    #         sampled_uvnswcs_list = list(set(sampled_uvnswcs_list))
+
+    #     # Determine the number of sampled unique valid nswcs (uvnswcs)
+    #     num_sampled_uvnswcs = len(sampled_uvnswcs_list)
+
+    #     if logger is None:
+    #         print(f"[{iteration}] Number of already sampled unique valid nswcs: {num_sampled_uvnswcs} (Duration since start: {(time.time()-global_start_time)/60:.2f}min)")
+    #         print('-'*100)
+    #     else:
+    #         logger.info(f"[{iteration}] Number of already sampled unique valid nswcs: {num_sampled_uvnswcs} (Duration since start: {(time.time()-global_start_time)/60:.2f}min)")
+    #         logger.info('-'*100)
+
+    #     tensorboard_writer.add_scalar(f"{property_name}/Num-sampled-molecules", num_sampled_uvnswcs, iteration)
+
+    #     # If the number of unique valid generated nswcs exceeds the requestes number, 
+    #     # halt generation
+        
+    #     if num_uvnswcs_requested<=num_sampled_uvnswcs:
+    #         break
+
+    # logger.info(f"Generated at least {num_uvnswcs_requested} valid molecules. Duration: {(time.time()-global_start_time)/60:.2f}min")
+
+    # # Stack the DataFrames in the list 'generated_df_list' to obtain one big DataFrame
+    # generated_df = pd.concat(generated_df_list)
+
+    # # Only keep the first 'args.num_valid_molecule_samples' samples
+    # generated_df = generated_df[:args.num_valid_molecule_samples]
 
     # Save this DataFrame
-    file_path = str(Path(generation_cfg.outputs_dir, 'samples_table.tsv'))
-    generated_df.to_csv(file_path, index=False, sep='\t')
+    file_name = f'samples_table_t{generation_cfg.sampler.guide_temp}_w{target_property_value}_n{num_uvnswcs_requested}.tsv'
+    file_path = str(Path(generation_cfg.outputs_dir, file_name))
+    generated_df_list = pd.Series(generated_df_list)
+    generated_df_list.to_csv(file_path, index=False, sep='\t')
+    # generated_df.to_csv(file_path, index=False, sep='\t')
     logger.info(f"Stored the samples as table in: {file_path}")
+    logger.info(f"Number of unique valid nswcs: {len(generated_df_list)}")
 
-    # Get all unique valid smiles
-    filtered_df = generated_df[generated_df['valid']==True]
-    unique_valid_gen_smiles_list = list(set(filtered_df['smiles']))
+    # # Get all unique valid smiles
+    # filtered_df = generated_df[generated_df['valid']==True]
+    # unique_valid_gen_smiles_list = list(set(filtered_df['smiles']))
 
-    # Only make a plot if there are any unique valid generated smiles
-    if len(unique_valid_gen_smiles_list)>0 and generation_cfg.make_figs:
-        property_names = ['num_tokens', 'logp', 'num_rings', 'num_heavy_atoms']
-        fig, axs = plt.subplots(2, 2, figsize=(10, 10))
-        if target_property_value is None:
-            guide_temp_label = None
-        else:
-            guide_temp_label = generation_cfg.sampler.guide_temp
-        plt.suptitle(f"Target {property_name}: {target_property_value} | Stochasticity: {generation_cfg.sampler.noise} | T: {guide_temp_label}")
-        for index, property_name in enumerate(property_names):
-            index1 = index%2
-            index2 = (index-index1)//2
-            ax = axs[index1, index2]
-            plotting.plot_gen_vs_train_distribution(property_name, 
-                                                    orchestrator.molecules_data_handler.subset_df_dict['train'], 
-                                                    unique_valid_gen_smiles_list,
-                                                    ax=ax)
+    # # Only make a plot if there are any unique valid generated smiles
+    # if len(unique_valid_gen_smiles_list)>0 and generation_cfg.make_figs:
+    #     property_names = ['num_tokens', 'logp', 'num_rings', 'num_heavy_atoms']
+    #     fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+    #     if target_property_value is None:
+    #         guide_temp_label = None
+    #     else:
+    #         guide_temp_label = generation_cfg.sampler.guide_temp
+    #     plt.suptitle(f"Target {property_name}: {target_property_value} | Stochasticity: {generation_cfg.sampler.noise} | T: {guide_temp_label}")
+    #     for index, property_name in enumerate(property_names):
+    #         index1 = index%2
+    #         index2 = (index-index1)//2
+    #         ax = axs[index1, index2]
+    #         plotting.plot_gen_vs_train_distribution(property_name, 
+    #                                                 orchestrator.molecules_data_handler.subset_df_dict['train'], 
+    #                                                 unique_valid_gen_smiles_list,
+    #                                                 ax=ax)
             
-        # Save the figure
-        if generation_cfg.save_figs and generation_cfg.figs_save_dir is not None:
-            file_path = str(Path(generation_cfg.figs_save_dir, f"Visualization_samples.png"))
-            fig.savefig(file_path)
+    #     # Save the figure
+    #     if generation_cfg.save_figs and generation_cfg.figs_save_dir is not None:
+    #         file_path = str(Path(generation_cfg.figs_save_dir, f"Visualization_samples.png"))
+    #         fig.savefig(file_path)
                         
