@@ -57,27 +57,21 @@ class MoleculesDataHandler(object):
         self.dataset_df = self.filter_dataset_df(dataset_df)
 
         # Determine the maximal number of tokens (over all nswcs)
-        # need revision
+        # modified to layout
+        # self.max_num_tokens = max([len(nswcs) for nswcs in self.dataset_df['nswcs']])
         self.max_num_tokens = max([len(layout) for layout in self.dataset_df['layout']])
         self.display(f"Maximum number of tokens (over all layout): {self.max_num_tokens}")
-        # self.max_num_tokens = max([len(nswcs) for nswcs in self.dataset_df['nswcs']])
-        # self.display(f"Maximum number of tokens (over all nswcs): {self.max_num_tokens}")
 
         # Determine the unique tokens in the nswcs list
         unique_tokens_set = set()
-        # for nswcs in self.dataset_df['nswcs']:
         for layout in self.dataset_df['layout']:
             unique_tokens_set.update(set([token for token in layout]))
 
         self.display(f"Unique tokens (#{len(unique_tokens_set)}): {unique_tokens_set}")
 
         # Initialize a smiles encoder (that can also be used for decoding)
-        # Do i have to make advance to SMILESEncoder?
         self.smiles_encoder = SMILESEncoder(unique_tokens_set, 
                                             max_num_tokens=self.max_num_tokens)
-        
-        self.display(f'self.smiles_encoder.token_alphabet_size : {self.smiles_encoder.token_alphabet_size}')
-        self.display(f'self.smiles_encoder.token_to_index_map : {self.smiles_encoder.token_to_index_map}')
 
         # Split data into train-validation (i.e. no test set here)
         ix_train, ix_validation = ix_train_test_split(len(self.dataset_df), 
@@ -91,8 +85,11 @@ class MoleculesDataHandler(object):
 
         # Loop over the properties and their sampling specifications
         # Remark: This will add property-train subsets to self.subset_df_dict
-        for property_name, sampling_specs in self.property_data_sampling_dict.items():
-            self.sample_property_train_subset(property_name, **sampling_specs)
+        # 여기서 property간의 관계를 조사하는거, 우리 데이터셋은 모든 property가 다르기 때문에 이 과정을 생략해야함
+        
+        # # modified 주석처리
+        # for property_name, sampling_specs in self.property_data_sampling_dict.items():
+        #     self.sample_property_train_subset(property_name, **sampling_specs)
 
         # Display the number of datapoints in all subsets
         for set_name, set_df in self.subset_df_dict.items():
@@ -102,14 +99,13 @@ class MoleculesDataHandler(object):
         self.torch_dataset_dict = dict()
         for set_name, subset_df in self.subset_df_dict.items():
             # Encode the nswcs as matrix for the current set
-            encoded_layout_matrix = np.vstack([self.smiles_encoder(layout) for layout in subset_df['layout']])
-            # encoded_nswcs_matrix = np.vstack([self.smiles_encoder(nswcs) for nswcs in subset_df['nswcs']])
+            encoded_nswcs_matrix = np.vstack([self.smiles_encoder(layout) for layout in subset_df['layout']])
             
             # Other data attributes
             set_attributes_dict = {property_name: torch.tensor(list(subset_df[property_name])) for property_name in self.torch_data_property_names}
 
             # Construct the dict-dataset
-            torch_dataset = DictDataset(x=torch.tensor(encoded_layout_matrix, dtype=torch.int), 
+            torch_dataset = DictDataset(x=torch.tensor(encoded_nswcs_matrix, dtype=torch.int), 
                                         **set_attributes_dict)
             self.torch_dataset_dict[set_name] = torch_dataset
 
@@ -184,7 +180,6 @@ class MoleculesDataHandler(object):
 
         """
         # Generate a list containing the number of tokens per nswcs in the train set
-        # num_tokens_per_train_nswcs_list = [len(nswcs) for nswcs in self.subset_df_dict['train']['nswcs']]
         num_tokens_per_train_nswcs_list = [len(layout) for layout in self.subset_df_dict['train']['layout']]
         
         # Count the number of occurances of a certain "number of tokens". 
@@ -242,7 +237,6 @@ class MoleculesDataHandler(object):
                 _hist = plotting.custom_hist(dataset_df[property_name], bins=100, color='teal', histtype='stepfilled', label='pre-filter', ax=ax)
 
             # Filter
-            # what this method actually does
             dataset_df = dataset_df[(filter_range[0]<=dataset_df[property_name]) & (dataset_df[property_name]<=filter_range[1])]
 
             if self.make_figs:
@@ -575,18 +569,13 @@ class SMILESEncoder(object):
             err_msg = f"Cannot use '{self.pad_token}' as pad token as this token already appears in the unpadded smiles."
             raise ValueError(err_msg)
         
-        # print(f"{len(self.unique_tokens_list)} unique tokens in the smiles list.")
-        
         # Add the pad token at the end of the unique token list
         self.unique_tokens_list.append(self.pad_token)
-        
-        # self.di(f"{len(self.unique_tokens_list)} unique tokens in the smiles list (including pad token).")
 
         # Generate a mapping from token to index (i.e. categorical state label) and back
         self.index_to_token_map = {index: token for index, token in enumerate(self.unique_tokens_list)}
         self.token_to_index_map = {token: index for index, token in self.index_to_token_map.items()}
 
-        
     @property
     def token_alphabet_size(self) -> int:
         """ Return the token alphabet size (as integer). """
