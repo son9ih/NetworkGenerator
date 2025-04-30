@@ -132,25 +132,26 @@ if __name__=='__main__':
                     file_path = str(Path(cfg.figs_save_dir, f"log_sigma_t_{model_name}.png"))
                     fig.savefig(file_path)
 
-                # Correlation model to gt on train set
-                fig = plotting.make_correlation_plot(model_name, 
-                                                       orchestrator,
-                                                       set_name=property_set_name,
-                                                       t_eval=1, 
-                                                       seed=42)
-                if cfg.save_figs and cfg.figs_save_dir is not None:
-                    file_path = str(Path(cfg.figs_save_dir, f"correlation_plot_train_{model_name}.png"))
-                    fig.savefig(file_path)
+                # modified 0423 plotting error
+                # # Correlation model to gt on train set
+                # fig = plotting.make_correlation_plot(model_name, 
+                #                                        orchestrator,
+                #                                        set_name=property_set_name,
+                #                                        t_eval=1, 
+                #                                        seed=42)
+                # if cfg.save_figs and cfg.figs_save_dir is not None:
+                #     file_path = str(Path(cfg.figs_save_dir, f"correlation_plot_train_{model_name}.png"))
+                #     fig.savefig(file_path)
 
-                # Correlation model to gt on validation set
-                fig = plotting.make_correlation_plot(model_name, 
-                                                       orchestrator,
-                                                       set_name='validation',
-                                                       t_eval=1, 
-                                                       seed=42)
-                if cfg.save_figs and cfg.figs_save_dir is not None:
-                    file_path = str(Path(cfg.figs_save_dir, f"correlation_plot_validation_{model_name}.png"))
-                    fig.savefig(file_path)
+                # # Correlation model to gt on validation set
+                # fig = plotting.make_correlation_plot(model_name, 
+                #                                        orchestrator,
+                #                                        set_name='validation',
+                #                                        t_eval=1, 
+                #                                        seed=42)
+                # if cfg.save_figs and cfg.figs_save_dir is not None:
+                #     file_path = str(Path(cfg.figs_save_dir, f"correlation_plot_validation_{model_name}.png"))
+                #     fig.savefig(file_path)
         
         if 1<len(train_models):
             logger.info('-'*100)
